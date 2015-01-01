@@ -54,6 +54,9 @@ int main(int argc, char **argv)
 		exit(1);
 	} 
 
+	sprintf(buff, "/name %s\n", argv[3]);
+	write(sockfd, buff, strlen(buff));
+
 	FD_ZERO(&allset);
 	FD_SET(fileno(stdin), &allset);
 	FD_SET(sockfd, &allset);
