@@ -98,7 +98,7 @@ int main(int argc, char **argv)
 					datafd = socket(AF_INET, SOCK_STREAM, 0);
 					servaddr.sin_port = htons(dport);
 					if (connect(datafd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
-						fprintf(stderr, "connect error\n");
+						fprintf(stderr, "upload connect error\n");
 						exit(1);
 					} 
 
@@ -131,6 +131,35 @@ int main(int argc, char **argv)
 
 			buff[n] = 0;
 			printf("%s", buff);
+			if(sscanf(buff, "/put %s %hu %ld", filename, &dport, &sz) == 3) {
+				datafd = socket(AF_INET, SOCK_STREAM, 0);
+				servaddr.sin_port = htons(dport);
+				if (connect(datafd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
+					fprintf(stderr, "download connect error\n");
+					exit(1);
+				} 
+
+				if ( (fp = fopen(filename, "w")) == NULL) {
+					fprintf(stderr, "file open error\n");
+				} else {
+					fprintf(stderr, "Downloading file : %s\n", filename);
+					print_status(22, 0);
+					nread = 0;
+					while ( (n = read(datafd, buff, sizeof(buff))) > 0 ) {
+						nread += n;
+						fwrite(buff, n, 1, fp);
+						print_status(22, nread*22/sz);
+					}
+					if (n == 0) {
+						fclose(fp);
+						close(datafd);
+					} else if (n < 0) {
+						fprintf(stderr, "download connection failed\n");
+						exit(1);
+					}
+					fprintf(stderr, "\nDownload %s complete!\n", filename);
+				}
+			}
 		}
 	}
 

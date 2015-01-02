@@ -25,6 +25,7 @@ public:
 	int status;
 	string filename;
 	FILE *fp;
+	list<string> files;
 
 	conn() {};
 	conn(int connfd) { ctrlfd = connfd; datafd = -1; status = IDLE; }
@@ -34,6 +35,15 @@ class user {
 public:
 	list<string> files;
 	list<conn> conns;
+
+	void broadcast(string filename, list<conn>::iterator excl) {
+		for (list<conn>::iterator it = conns.begin(); it != conns.end(); it++) {
+			if (it != excl) {
+				it->files.push_back(filename);
+			}
+		}
+		files.push_back(filename);
+	}
 };
 
 int new_tcp_socket()
@@ -63,7 +73,9 @@ int new_tcp_socket()
 int main(int argc, char **argv)
 {
 	ssize_t n;
+	size_t nr;
 	int i;
+	long sz;
 	socklen_t clilen;
 	socklen_t len;
 	int listenfd, connfd, sockfd, dlistenfd, dconnfd;
@@ -103,8 +115,11 @@ int main(int argc, char **argv)
 	listen(listenfd, 10);
 
 	for(;;) {
+		// --------------------------------------------------------------------------------
+		// setup select
+		// --------------------------------------------------------------------------------
 		FD_ZERO(&rset);
-		//FD_ZERO(&wset);
+		FD_ZERO(&wset);
 		FD_SET(listenfd, &rset);
 		maxfd = listenfd;
 
@@ -113,22 +128,63 @@ int main(int argc, char **argv)
 			if (*pend_it > maxfd) maxfd = *pend_it;
 		}
 
-		for(map<string, user>::const_iterator users_it = users.begin(); users_it != users.end(); users_it++) {
+		for(map<string, user>::iterator users_it = users.begin(); users_it != users.end(); users_it++) {
 			const string &cur_name = users_it->first;
-			const user &cur_user = users_it->second;
-			for(list<conn>::const_iterator conn_it = cur_user.conns.begin(); conn_it != cur_user.conns.end(); conn_it++) {
+			user &cur_user = users_it->second;
+			for(list<conn>::iterator conn_it = cur_user.conns.begin(); conn_it != cur_user.conns.end(); conn_it++) {
 				FD_SET(conn_it->ctrlfd, &rset);
 				if (conn_it->ctrlfd > maxfd) maxfd = conn_it->ctrlfd;
 
-				if (conn_it->status != IDLE) {
+				if (conn_it->status == IDLE && !conn_it->files.empty()) {
+					dlistenfd = new_tcp_socket();
+					len = sizeof(dservaddr);
+					getsockname(dlistenfd, (struct sockaddr *) &dservaddr, &len);
+
+					conn_it->status = WAIT_DOWNLOAD;
+					conn_it->datafd = dlistenfd;
+					conn_it->filename = conn_it->files.front();
+					conn_it->files.pop_front();
+
+					fprintf(stderr, "openning file %s\n", conn_it->filename.c_str());
+					if ((conn_it->fp = fopen(conn_it->filename.c_str(), "r")) == NULL) {
+						fprintf(stderr, "open input file error\n");
+						exit(1);
+					} else {
+						fprintf(stderr, "open file %s\n", conn_it->filename.c_str());
+					}
+
+					fseek(conn_it->fp, 0L, SEEK_END);
+					sz = ftell(conn_it->fp);
+					fseek(conn_it->fp, 0L, SEEK_SET);
+
+					sprintf(sendbuff, "/put %s %hu %ld", conn_it->filename.c_str(), ntohs(dservaddr.sin_port), sz);
+					write(conn_it->ctrlfd, sendbuff, strlen(sendbuff));
+
+					printf("bind port: %hu\n", ntohs(dservaddr.sin_port));
+				}
+
+				if (conn_it->status == WAIT_UPLOAD || conn_it->status == WAIT_DOWNLOAD || conn_it->status == UPLOAD) {
 					FD_SET(conn_it->datafd, &rset);
+					if (conn_it->datafd > maxfd) maxfd = conn_it->datafd;
+				}
+
+				if (conn_it->status == DOWNLOAD) {
+					FD_SET(conn_it->datafd, &wset);
 					if (conn_it->datafd > maxfd) maxfd = conn_it->datafd;
 				}
 			}
 		}
 
-		select(maxfd+1, &rset, NULL, NULL, NULL);
+		// --------------------------------------------------------------------------------
+		// call select
+		// --------------------------------------------------------------------------------
+		fprintf(stderr, "call select\n");
+		select(maxfd+1, &rset, &wset, NULL, NULL);
+		fprintf(stderr, "exit select\n");
 
+		// --------------------------------------------------------------------------------
+		// check listening socket
+		// --------------------------------------------------------------------------------
 		if (FD_ISSET(listenfd, &rset)) {
 			clilen = sizeof(cliaddr);
 			connfd = accept(listenfd, (struct sockaddr *) &cliaddr, &clilen);
@@ -144,6 +200,9 @@ int main(int argc, char **argv)
 			pend.push_back(connfd);
 		} // listenfd if
 
+		// --------------------------------------------------------------------------------
+		// check pending connections
+		// --------------------------------------------------------------------------------
 		for(list<int>::const_iterator pend_it = pend.begin(); pend_it != pend.end();) {
 			if (FD_ISSET(*pend_it, &rset)) {
 				sockfd = *pend_it;
@@ -163,6 +222,7 @@ int main(int argc, char **argv)
 						sprintf(sendbuff, "Welcome to the dropbox-like server! : %s\n", username);
 						fprintf(stderr, "connection from: %s\n", username);
 						write(sockfd, sendbuff, strlen(sendbuff));
+						FD_CLR(sockfd, &rset);
 					}
 				}
 			} else {
@@ -170,12 +230,35 @@ int main(int argc, char **argv)
 			}
 		} // pend for
 
+		// --------------------------------------------------------------------------------
+		// check established connections
+		// --------------------------------------------------------------------------------
 		for(map<string, user>::iterator users_it = users.begin(); users_it != users.end(); users_it++) {
 			const string &cur_name = users_it->first;
 			user &cur_user = users_it->second;
 			for(list<conn>::iterator conn_it = cur_user.conns.begin(); conn_it != cur_user.conns.end();) {
 
-				if (FD_ISSET(conn_it->datafd, &rset)) {
+				if (conn_it->status != IDLE && FD_ISSET(conn_it->datafd, &wset)) {
+					if( (nr = fread(buff, 1, sizeof(buff), conn_it->fp)) == 0 ) {
+						close(conn_it->datafd);
+						fclose(conn_it->fp);
+						conn_it->datafd = -1;
+						conn_it->status = IDLE;
+					} else {
+						if ( (n = write(conn_it->datafd, buff, nr)) < 0 ) {
+							fprintf(stderr, "data send error\n");
+							exit(1);
+						} else if (n == 0) {
+							fprintf(stderr, "client closed download connection\n");
+							fclose(conn_it->fp);
+							conn_it->datafd = -1;
+							conn_it->status = IDLE;
+						} else if (n < nr) {
+							fprintf(stderr, "not all data are sent\n");
+						}
+					}
+
+				} else if (conn_it->status != IDLE && FD_ISSET(conn_it->datafd, &rset)) {
 					switch (conn_it->status) {
 						case WAIT_UPLOAD:
 							dconnfd = accept(conn_it->datafd, (struct sockaddr *) &cliaddr, &clilen);
@@ -200,9 +283,18 @@ int main(int argc, char **argv)
 								fclose(conn_it->fp);
 								conn_it->datafd = -1;
 								conn_it->status = IDLE;
+								cur_user.broadcast(conn_it->filename, conn_it);
 							} else {
 								fwrite(buff, n, 1, conn_it->fp);
 							}
+							break;
+
+						case WAIT_DOWNLOAD:
+							dconnfd = accept(conn_it->datafd, (struct sockaddr *) &cliaddr, &clilen);
+							printf("data connection accepted\n");
+							close(conn_it->datafd);
+							conn_it->datafd = dconnfd;
+							conn_it->status = DOWNLOAD;
 							break;
 					}
 					conn_it++;
@@ -237,9 +329,12 @@ int main(int argc, char **argv)
 				} else {
 					conn_it++;
 				} // else FD_ISSET
+
 			} // conns for
+
 		} // users for
-	}
+
+	} // select for
 
 	return 0;
 }
