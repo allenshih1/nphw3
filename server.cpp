@@ -280,12 +280,8 @@ int main(int argc, char **argv)
 							} else {
 								fprintf(stderr, "write would block\n");
 							}
-						} else if (n == 0) {
-							fprintf(stderr, "client closed download connection\n");
-							fclose(conn_it->fp);
-							conn_it->datafd = -1;
-							conn_it->status = IDLE;
 						} else if (n < nr) {
+							fseek(conn_it->fp, n-nr, SEEK_CUR);
 							fprintf(stderr, "not all data are sent\n");
 						} else {
 							//fprintf(stderr, "data sent\n");
