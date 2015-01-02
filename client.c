@@ -218,6 +218,8 @@ int main(int argc, char **argv)
 					}
 					fprintf(stderr, "\nDownload %s complete!\n", filename);
 				}
+			} else {
+				fprintf(stderr, "%s", buff);
 			}
 		}
 

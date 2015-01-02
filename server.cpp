@@ -57,9 +57,8 @@ int new_tcp_socket()
 	int val, flag;
 	struct sockaddr_in servaddr;
 	listenfd = socket(AF_INET, SOCK_STREAM, 0);
-
-	//flag = fcntl(listenfd, F_GETFL, 0);
-	//fcntl(listenfd, F_SETFL, flag|O_NONBLOCK);
+	flag = fcntl(listenfd, F_GETFL, 0);
+	fcntl(listenfd, F_SETFL, flag|O_NONBLOCK);
 
 	val = 1;
 	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
@@ -80,6 +79,7 @@ int main(int argc, char **argv)
 	ssize_t n;
 	size_t nr;
 	int i;
+	int flag;
 	long sz;
 	socklen_t clilen;
 	socklen_t len;
@@ -106,6 +106,8 @@ int main(int argc, char **argv)
 	}
 
 	listenfd = socket(AF_INET, SOCK_STREAM, 0);
+	flag = fcntl(listenfd, F_GETFL, 0);
+	fcntl(listenfd, F_SETFL, flag|O_NONBLOCK);
 
 	val = 1;
 	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
@@ -192,17 +194,22 @@ int main(int argc, char **argv)
 		// --------------------------------------------------------------------------------
 		if (FD_ISSET(listenfd, &rset)) {
 			clilen = sizeof(cliaddr);
-			connfd = accept(listenfd, (struct sockaddr *) &cliaddr, &clilen);
+			if ( (connfd = accept(listenfd, (struct sockaddr *) &cliaddr, &clilen)) < 0) {
+				if(errno != EWOULDBLOCK) {
+					fprintf(stderr, "accept error\n");
+					exit(1);
+				}
+			} else {
+				/* print client info */
+				len = sizeof(servaddr);
+				getsockname(connfd, (struct sockaddr *) &servaddr, &len);
+				inet_ntop(AF_INET, &servaddr.sin_addr, buff, sizeof(buff));
+				fprintf(stderr, "%s:%hu\n", buff, ntohs(servaddr.sin_port));
+				inet_ntop(AF_INET, &cliaddr.sin_addr, buff, sizeof(buff));
+				fprintf(stderr, "%s:%hu\n", buff, ntohs(cliaddr.sin_port));
 
-			/* print client info */
-			len = sizeof(servaddr);
-			getsockname(connfd, (struct sockaddr *) &servaddr, &len);
-			inet_ntop(AF_INET, &servaddr.sin_addr, buff, sizeof(buff));
-			fprintf(stderr, "%s:%hu\n", buff, ntohs(servaddr.sin_port));
-			inet_ntop(AF_INET, &cliaddr.sin_addr, buff, sizeof(buff));
-			fprintf(stderr, "%s:%hu\n", buff, ntohs(cliaddr.sin_port));
-
-			pend.push_back(connfd);
+				pend.push_back(connfd);
+			}
 		} // listenfd if
 
 		// --------------------------------------------------------------------------------
@@ -212,7 +219,10 @@ int main(int argc, char **argv)
 			if (FD_ISSET(*pend_it, &rset)) {
 				sockfd = *pend_it;
 				if ( (n = read(sockfd, recvbuff, sizeof(recvbuff))) < 0 ) {
-					fprintf(stderr, "client connection error\n");
+					if (errno != EWOULDBLOCK) {
+						fprintf(stderr, "client connection error\n");
+						exit(1);
+					}
 					pend_it = pend.erase(pend_it);
 				} else if (n == 0) {
 					fprintf(stderr, "client closed connection\n");
@@ -226,7 +236,14 @@ int main(int argc, char **argv)
 						users[username].conns.push_back(conn(sockfd, users[username].files));
 						sprintf(sendbuff, "Welcome to the dropbox-like server! : %s\n", username);
 						fprintf(stderr, "connection from: %s\n", username);
-						write(sockfd, sendbuff, strlen(sendbuff));
+						if( (n = write(sockfd, sendbuff, strlen(sendbuff))) < 0) {
+							if(errno != EWOULDBLOCK) {
+								fprintf(stderr, "write welcome message error\n");
+								exit(1);
+							} else {
+								fprintf(stderr, "write welcome message failed\n");
+							}
+						}
 						FD_CLR(sockfd, &rset);
 					}
 				}
@@ -249,10 +266,16 @@ int main(int argc, char **argv)
 						fclose(conn_it->fp);
 						conn_it->datafd = -1;
 						conn_it->status = IDLE;
+						conn_it->filename = "";
+						fprintf(stderr, "all data sent\n");
 					} else {
 						if ( (n = write(conn_it->datafd, buff, nr)) < 0 ) {
-							fprintf(stderr, "data send error\n");
-							exit(1);
+							if (errno != EWOULDBLOCK) {
+								fprintf(stderr, "data send error\n");
+								exit(1);
+							} else {
+								fprintf(stderr, "write would block\n");
+							}
 						} else if (n == 0) {
 							fprintf(stderr, "client closed download connection\n");
 							fclose(conn_it->fp);
@@ -260,30 +283,40 @@ int main(int argc, char **argv)
 							conn_it->status = IDLE;
 						} else if (n < nr) {
 							fprintf(stderr, "not all data are sent\n");
+						} else {
+							//fprintf(stderr, "data sent\n");
 						}
 					}
 
 				} else if (conn_it->status != IDLE && FD_ISSET(conn_it->datafd, &rset)) {
 					switch (conn_it->status) {
 						case WAIT_UPLOAD:
-							dconnfd = accept(conn_it->datafd, (struct sockaddr *) &cliaddr, &clilen);
-							fprintf(stderr, "upload data connection accepted\n");
-							close(conn_it->datafd);
-							conn_it->datafd = dconnfd;
-							conn_it->status = UPLOAD;
-
-							if ((conn_it->fp = fopen(conn_it->filename.c_str(), "w")) == NULL) {
-								fprintf(stderr, "open output file error\n");
-								exit(1);
+							if( (dconnfd = accept(conn_it->datafd, (struct sockaddr *) &cliaddr, &clilen)) < 0) {
+								if(errno != EWOULDBLOCK) {
+									fprintf(stderr, "accept error\n");
+									exit(1);
+								}
 							} else {
-								fprintf(stderr, "open file %s\n", conn_it->filename.c_str());
+								fprintf(stderr, "upload data connection accepted\n");
+								close(conn_it->datafd);
+								conn_it->datafd = dconnfd;
+								conn_it->status = UPLOAD;
+
+								if ((conn_it->fp = fopen(conn_it->filename.c_str(), "w")) == NULL) {
+									fprintf(stderr, "open output file error\n");
+									exit(1);
+								} else {
+									fprintf(stderr, "open file %s\n", conn_it->filename.c_str());
+								}
 							}
 							break;
 
 						case UPLOAD:
 							if ( (n = read(conn_it->datafd, buff, sizeof(buff))) < 0 ) {
-								fprintf(stderr, "data read error\n");
-								exit(1);
+								if (errno != EWOULDBLOCK) {
+									fprintf(stderr, "data read error\n");
+									exit(1);
+								}
 							} else if (n == 0) {
 								fclose(conn_it->fp);
 								conn_it->datafd = -1;
@@ -295,20 +328,29 @@ int main(int argc, char **argv)
 							break;
 
 						case WAIT_DOWNLOAD:
-							dconnfd = accept(conn_it->datafd, (struct sockaddr *) &cliaddr, &clilen);
-							fprintf(stderr, "download data connection accepted\n");
-							close(conn_it->datafd);
-							conn_it->datafd = dconnfd;
-							conn_it->status = DOWNLOAD;
+							if ( (dconnfd = accept(conn_it->datafd, (struct sockaddr *) &cliaddr, &clilen)) < 0) {
+								if(errno != EWOULDBLOCK) {
+									fprintf(stderr, "accept error\n");
+									exit(1);
+								}
+							} else {
+								fprintf(stderr, "download data connection accepted\n");
+								close(conn_it->datafd);
+								conn_it->datafd = dconnfd;
+								conn_it->status = DOWNLOAD;
+							}
 							break;
 					}
 					conn_it++;
 				} else if (FD_ISSET(conn_it->ctrlfd, &rset)) {
 					connfd = conn_it->ctrlfd;
 					if( (n = read(connfd, buff, sizeof(buff))) < 0 ) {
-						fprintf(stderr, "connection failed\n");
-						exit(1);
-						conn_it = cur_user.conns.erase(conn_it);
+						if (errno != EWOULDBLOCK) {
+							fprintf(stderr, "connection failed\n");
+							conn_it = cur_user.conns.erase(conn_it);
+							exit(1);
+						}
+						conn_it++;
 					} else if (n == 0) {
 						fprintf(stderr, "connection closed by client\n");
 						conn_it = cur_user.conns.erase(conn_it);
@@ -322,7 +364,12 @@ int main(int argc, char **argv)
 							getsockname(dlistenfd, (struct sockaddr *) &dservaddr, &len);
 
 							sprintf(sendbuff, "/pasv %hu", ntohs(dservaddr.sin_port));
-							write(connfd, sendbuff, strlen(sendbuff));
+							if ( (n = write(connfd, sendbuff, strlen(sendbuff))) < 0 ) {
+								if(errno != EWOULDBLOCK) {
+									fprintf(stderr, "send /pasv error");
+									exit(1);
+								}
+							}
 							fprintf(stderr, "bind port: %hu\n", ntohs(dservaddr.sin_port));
 
 							conn_it->datafd = dlistenfd;
