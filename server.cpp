@@ -27,8 +27,13 @@ public:
 	FILE *fp;
 	list<string> files;
 
-	conn() {};
-	conn(int connfd) { ctrlfd = connfd; datafd = -1; status = IDLE; }
+	conn(int connfd, list<string> &filelist) { 
+		ctrlfd = connfd;
+		datafd = -1;
+		status = IDLE;
+		files = filelist;
+		fp = NULL;
+	}
 };
 
 class user {
@@ -157,10 +162,10 @@ int main(int argc, char **argv)
 					sz = ftell(conn_it->fp);
 					fseek(conn_it->fp, 0L, SEEK_SET);
 
-					sprintf(sendbuff, "/put %s %hu %ld", conn_it->filename.c_str(), ntohs(dservaddr.sin_port), sz);
+					sprintf(sendbuff, "/put %s %hu %ld\n", conn_it->filename.c_str(), ntohs(dservaddr.sin_port), sz);
 					write(conn_it->ctrlfd, sendbuff, strlen(sendbuff));
 
-					printf("bind port: %hu\n", ntohs(dservaddr.sin_port));
+					fprintf(stderr, "bind port: %hu\n", ntohs(dservaddr.sin_port));
 				}
 
 				if (conn_it->status == WAIT_UPLOAD || conn_it->status == WAIT_DOWNLOAD || conn_it->status == UPLOAD) {
@@ -178,9 +183,9 @@ int main(int argc, char **argv)
 		// --------------------------------------------------------------------------------
 		// call select
 		// --------------------------------------------------------------------------------
-		fprintf(stderr, "call select\n");
+		//fprintf(stderr, "call select\n");
 		select(maxfd+1, &rset, &wset, NULL, NULL);
-		fprintf(stderr, "exit select\n");
+		//fprintf(stderr, "exit select\n");
 
 		// --------------------------------------------------------------------------------
 		// check listening socket
@@ -218,7 +223,7 @@ int main(int argc, char **argv)
 						fprintf(stderr, "name error\n");
 					} else {
 						pend_it = pend.erase(pend_it);
-						users[username].conns.push_back(conn(sockfd));
+						users[username].conns.push_back(conn(sockfd, users[username].files));
 						sprintf(sendbuff, "Welcome to the dropbox-like server! : %s\n", username);
 						fprintf(stderr, "connection from: %s\n", username);
 						write(sockfd, sendbuff, strlen(sendbuff));
@@ -262,7 +267,7 @@ int main(int argc, char **argv)
 					switch (conn_it->status) {
 						case WAIT_UPLOAD:
 							dconnfd = accept(conn_it->datafd, (struct sockaddr *) &cliaddr, &clilen);
-							printf("data connection accepted\n");
+							fprintf(stderr, "upload data connection accepted\n");
 							close(conn_it->datafd);
 							conn_it->datafd = dconnfd;
 							conn_it->status = UPLOAD;
@@ -291,7 +296,7 @@ int main(int argc, char **argv)
 
 						case WAIT_DOWNLOAD:
 							dconnfd = accept(conn_it->datafd, (struct sockaddr *) &cliaddr, &clilen);
-							printf("data connection accepted\n");
+							fprintf(stderr, "download data connection accepted\n");
 							close(conn_it->datafd);
 							conn_it->datafd = dconnfd;
 							conn_it->status = DOWNLOAD;
@@ -318,7 +323,7 @@ int main(int argc, char **argv)
 
 							sprintf(sendbuff, "/pasv %hu", ntohs(dservaddr.sin_port));
 							write(connfd, sendbuff, strlen(sendbuff));
-							printf("bind port: %hu\n", ntohs(dservaddr.sin_port));
+							fprintf(stderr, "bind port: %hu\n", ntohs(dservaddr.sin_port));
 
 							conn_it->datafd = dlistenfd;
 							conn_it->status = WAIT_UPLOAD;

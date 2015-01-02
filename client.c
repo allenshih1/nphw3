@@ -32,6 +32,7 @@ int main(int argc, char **argv)
 	char filename[1024];
 	struct sockaddr_in servaddr;
 	FILE *fp;
+	int downloading = 0;
 
 	if (argc != 4) {
 		fprintf(stderr, "usage: %s <ip> <port> <username>\n", argv[0]);
@@ -66,7 +67,7 @@ int main(int argc, char **argv)
 		rset = allset;
 		select(maxfdp1, &rset, NULL, NULL, NULL);
 		
-		if(FD_ISSET(fileno(stdin), &rset)) {
+		if (FD_ISSET(fileno(stdin), &rset)) {
 			if (fgets(buff, sizeof(buff), stdin) == NULL) {
 				close(sockfd);
 				exit(0);
@@ -76,10 +77,69 @@ int main(int argc, char **argv)
 				close(sockfd);
 				exit(0);
 			} else if (sscanf(buff, "/sleep %u", &sec) == 1) {
-				sleep(sec);
+				downloading = 0;
+				fprintf(stderr, "Client starts to sleep\n");
+				int i;
+				for (i = 0; i < sec; i++) {
+					fprintf(stderr, "Sleep %d\n", i+1);
+					sleep(1);
+					
+					FD_ZERO(&rset);
+					FD_SET(sockfd, &rset);
+					struct timeval tv;
+					tv.tv_sec = 0;
+					tv.tv_usec = 0;
+					if (select(sockfd+1, &rset, NULL, NULL, &tv) > 0) {
+						if( (n = read(sockfd, buff, sizeof(buff))) < 0 ) {
+							fprintf(stderr, "connection error\n");
+							exit(1);
+						} else if (n == 0) {
+							fprintf(stderr, "connection closed by server\n");
+							exit(1);
+						}
+						buff[n] = 0;
+						if(!downloading && sscanf(buff, "/put %s %hu %ld", filename, &dport, &sz) == 3) {
+							datafd = socket(AF_INET, SOCK_STREAM, 0);
+							servaddr.sin_port = htons(dport);
+							if (connect(datafd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
+								fprintf(stderr, "download connect error\n");
+								exit(1);
+							} 
+							downloading = 1;
+						}
+					}
+				}
+				fprintf(stderr, "Client wakes up\n");
+
+				// duplicate download place
+
+				if (downloading) {
+					if ( (fp = fopen(filename, "w")) == NULL) {
+						fprintf(stderr, "file open error\n");
+					} else {
+						fprintf(stderr, "Downloading file : %s\n", filename);
+						print_status(22, 0);
+						nread = 0;
+						while ( (n = read(datafd, buff, sizeof(buff))) > 0 ) {
+							nread += n;
+							fwrite(buff, n, 1, fp);
+							print_status(22, nread*22/sz);
+						}
+						if (n == 0) {
+							fclose(fp);
+							close(datafd);
+						} else if (n < 0) {
+							fprintf(stderr, "download connection failed\n");
+							exit(1);
+						}
+						fprintf(stderr, "\nDownload %s complete!\n", filename);
+					}
+					downloading = 0;
+				}
+
 			} else if (sscanf(buff, "/put %s", filename) == 1) {
 
-				if( (fp = fopen(filename, "rb")) == NULL) {
+				if( (fp = fopen(filename, "r")) == NULL) {
 					fprintf(stderr, "file open error\n");
 				} else {
 					write(sockfd, buff, strlen(buff));
@@ -130,7 +190,6 @@ int main(int argc, char **argv)
 			}
 
 			buff[n] = 0;
-			printf("%s", buff);
 			if(sscanf(buff, "/put %s %hu %ld", filename, &dport, &sz) == 3) {
 				datafd = socket(AF_INET, SOCK_STREAM, 0);
 				servaddr.sin_port = htons(dport);
@@ -161,6 +220,7 @@ int main(int argc, char **argv)
 				}
 			}
 		}
+
 	}
 
 	return 0;
