@@ -153,7 +153,7 @@ int main(int argc, char **argv)
 					conn_it->files.pop_front();
 
 					fprintf(stderr, "openning file %s\n", conn_it->filename.c_str());
-					if ((conn_it->fp = fopen(conn_it->filename.c_str(), "r")) == NULL) {
+					if ((conn_it->fp = fopen((cur_name+"_"+conn_it->filename).c_str(), "r")) == NULL) {
 						fprintf(stderr, "open input file error\n");
 						exit(1);
 					} else {
@@ -165,7 +165,11 @@ int main(int argc, char **argv)
 					fseek(conn_it->fp, 0L, SEEK_SET);
 
 					sprintf(sendbuff, "/put %s %hu %ld\n", conn_it->filename.c_str(), ntohs(dservaddr.sin_port), sz);
-					write(conn_it->ctrlfd, sendbuff, strlen(sendbuff));
+					if ( (n = write(conn_it->ctrlfd, sendbuff, strlen(sendbuff))) < 0) {
+						if (errno != EWOULDBLOCK) {
+							fprintf(stderr, "download request write error\n");
+						}
+					}
 
 					fprintf(stderr, "bind port: %hu\n", ntohs(dservaddr.sin_port));
 				}
@@ -302,7 +306,7 @@ int main(int argc, char **argv)
 								conn_it->datafd = dconnfd;
 								conn_it->status = UPLOAD;
 
-								if ((conn_it->fp = fopen(conn_it->filename.c_str(), "w")) == NULL) {
+								if ((conn_it->fp = fopen((cur_name+"_"+conn_it->filename).c_str(), "w")) == NULL) {
 									fprintf(stderr, "open output file error\n");
 									exit(1);
 								} else {

@@ -5,7 +5,7 @@
 #include<arpa/inet.h>
 #include<netinet/in.h>
 
-inline void print_status(int max, int cur)
+void print_status(int max, int cur)
 {
 	int i;
 	fprintf(stderr, "Progress : [");
@@ -26,6 +26,7 @@ int main(int argc, char **argv)
 	int maxfdp1;
 	ssize_t n;
 	long nread;
+	int oldbar, newbar;
 	long sz;
 	char buff[1024];
 	unsigned short dport;
@@ -120,10 +121,14 @@ int main(int argc, char **argv)
 						fprintf(stderr, "Downloading file : %s\n", filename);
 						print_status(22, 0);
 						nread = 0;
+						oldbar = newbar = 0;
 						while ( (n = read(datafd, buff, sizeof(buff))) > 0 ) {
 							nread += n;
 							fwrite(buff, n, 1, fp);
-							print_status(22, nread*22/sz);
+							oldbar = newbar;
+							newbar = nread*22/sz;
+							if(oldbar != newbar)
+								print_status(22, newbar);
 						}
 						if (n == 0) {
 							fclose(fp);
@@ -168,10 +173,14 @@ int main(int argc, char **argv)
 					fseek(fp, 0L, SEEK_SET);
 					print_status(22, 0);
 					nread = 0;
+					oldbar = newbar = 0;
 					while( (n = fread(buff, 1, sizeof(buff), fp)) > 0 ) {
 						nread += n;
 						write(datafd, buff, n);
-						print_status(22, nread*22/sz);
+						oldbar = newbar;
+						newbar = nread*22/sz;
+						if(oldbar != newbar)
+							print_status(22, newbar);
 					}
 					fprintf(stderr, "\nUpload %s complete!\n", filename);
 					fclose(fp);
@@ -204,10 +213,14 @@ int main(int argc, char **argv)
 					fprintf(stderr, "Downloading file : %s\n", filename);
 					print_status(22, 0);
 					nread = 0;
+					oldbar = newbar = 0;
 					while ( (n = read(datafd, buff, sizeof(buff))) > 0 ) {
 						nread += n;
 						fwrite(buff, n, 1, fp);
-						print_status(22, nread*22/sz);
+						oldbar = newbar;
+						newbar = nread*22/sz;
+						if(oldbar != newbar)
+							print_status(22, newbar);
 					}
 					if (n == 0) {
 						fclose(fp);
