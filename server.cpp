@@ -106,8 +106,8 @@ int main(int argc, char **argv)
 	}
 
 	listenfd = socket(AF_INET, SOCK_STREAM, 0);
-	flag = fcntl(listenfd, F_GETFL, 0);
-	fcntl(listenfd, F_SETFL, flag|O_NONBLOCK);
+	//flag = fcntl(listenfd, F_GETFL, 0);
+	//fcntl(listenfd, F_SETFL, flag|O_NONBLOCK);
 
 	val = 1;
 	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
