@@ -4,6 +4,52 @@
 #include<unistd.h>
 #include<arpa/inet.h>
 #include<netinet/in.h>
+#include<errno.h>
+
+int read_cnt = 0;
+char read_buff[1024];
+char *read_ptr;
+
+ssize_t my_read(int fd, char *ptr)
+{
+	if (read_cnt <= 0) {
+		again:
+		if ( (read_cnt = read(fd, read_buff, sizeof(read_buff))) < 0) {
+			if (errno == EINTR)
+				goto again;
+			return -1;
+		} else if (read_cnt == 0) {
+			return 0;
+		}
+		read_ptr = read_buff;
+	}
+	
+	read_cnt--;
+	*ptr = *read_ptr++;
+	return 1;
+}
+
+ssize_t readline(int fd, void *vptr, size_t maxlen)
+{
+	ssize_t n, rc;
+	char c, *ptr;
+
+	ptr = vptr;
+	for (n = 1; n < maxlen; n++) {
+		if ( (rc = my_read(fd, &c)) == 1) {
+			*ptr++ = c;
+			if (c == '\n')
+				break;
+		} else if (rc == 0) {
+			*ptr = 0;
+			return (n-1);
+		} else
+			return -1;
+	}
+
+	*ptr = 0;
+	return n;
+}
 
 void print_status(int max, int cur)
 {
@@ -91,7 +137,7 @@ int main(int argc, char **argv)
 					tv.tv_sec = 0;
 					tv.tv_usec = 0;
 					if (select(sockfd+1, &rset, NULL, NULL, &tv) > 0) {
-						if( (n = read(sockfd, buff, sizeof(buff))) < 0 ) {
+						if( (n = readline(sockfd, buff, sizeof(buff))) < 0 ) {
 							fprintf(stderr, "connection error\n");
 							exit(1);
 						} else if (n == 0) {
@@ -148,7 +194,7 @@ int main(int argc, char **argv)
 					fprintf(stderr, "file open error\n");
 				} else {
 					write(sockfd, buff, strlen(buff));
-					if( (n = read(sockfd, buff, sizeof(buff))) < 0 ) {
+					if( (n = readline(sockfd, buff, sizeof(buff))) < 0 ) {
 						fprintf(stderr, "data connection error\n");
 						exit(1);
 					} else if (n == 0) {
@@ -190,7 +236,7 @@ int main(int argc, char **argv)
 		}
 
 		if(FD_ISSET(sockfd, &rset)) {
-			if( (n = read(sockfd, buff, sizeof(buff))) < 0 ) {
+			if( (n = readline(sockfd, buff, sizeof(buff))) < 0 ) {
 				fprintf(stderr, "connection error\n");
 				exit(1);
 			} else if (n == 0) {

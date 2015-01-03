@@ -130,7 +130,7 @@ int main(int argc, char **argv)
 		FD_SET(listenfd, &rset);
 		maxfd = listenfd;
 
-		for(list<int>::const_iterator pend_it = pend.begin(); pend_it != pend.end(); pend_it++) {
+		for(list<int>::iterator pend_it = pend.begin(); pend_it != pend.end(); pend_it++) {
 			FD_SET(*pend_it, &rset);
 			if (*pend_it > maxfd) maxfd = *pend_it;
 		}
@@ -219,7 +219,7 @@ int main(int argc, char **argv)
 		// --------------------------------------------------------------------------------
 		// check pending connections
 		// --------------------------------------------------------------------------------
-		for(list<int>::const_iterator pend_it = pend.begin(); pend_it != pend.end();) {
+		for(list<int>::iterator pend_it = pend.begin(); pend_it != pend.end();) {
 			if (FD_ISSET(*pend_it, &rset)) {
 				sockfd = *pend_it;
 				if ( (n = read(sockfd, recvbuff, sizeof(recvbuff))) < 0 ) {
@@ -284,7 +284,7 @@ int main(int argc, char **argv)
 							fseek(conn_it->fp, n-nr, SEEK_CUR);
 							fprintf(stderr, "not all data are sent\n");
 						} else {
-							//fprintf(stderr, "data sent\n");
+							fprintf(stderr, "data sent %d\n",n );
 						}
 					}
 
@@ -335,6 +335,10 @@ int main(int argc, char **argv)
 								}
 							} else {
 								fprintf(stderr, "download data connection accepted\n");
+								flag = fcntl(dconnfd, F_GETFL, 0);
+								if(flag | O_NONBLOCK) {
+									fprintf(stderr, "non_blocking\n");
+								}
 								close(conn_it->datafd);
 								conn_it->datafd = dconnfd;
 								conn_it->status = DOWNLOAD;
@@ -363,7 +367,7 @@ int main(int argc, char **argv)
 							len = sizeof(dservaddr);
 							getsockname(dlistenfd, (struct sockaddr *) &dservaddr, &len);
 
-							sprintf(sendbuff, "/pasv %hu", ntohs(dservaddr.sin_port));
+							sprintf(sendbuff, "/pasv %hu\n", ntohs(dservaddr.sin_port));
 							if ( (n = write(connfd, sendbuff, strlen(sendbuff))) < 0 ) {
 								if(errno != EWOULDBLOCK) {
 									fprintf(stderr, "send /pasv error");
