@@ -6,29 +6,6 @@
 #include<netinet/in.h>
 #include<errno.h>
 
-int read_cnt = 0;
-char read_buff[1024];
-char *read_ptr;
-
-ssize_t my_read(int fd, char *ptr)
-{
-	if (read_cnt <= 0) {
-		again:
-		if ( (read_cnt = read(fd, read_buff, sizeof(read_buff))) < 0) {
-			if (errno == EINTR)
-				goto again;
-			return -1;
-		} else if (read_cnt == 0) {
-			return 0;
-		}
-		read_ptr = read_buff;
-	}
-	
-	read_cnt--;
-	*ptr = *read_ptr++;
-	return 1;
-}
-
 ssize_t readline(int fd, void *vptr, size_t maxlen)
 {
 	ssize_t n, rc;
@@ -36,7 +13,7 @@ ssize_t readline(int fd, void *vptr, size_t maxlen)
 
 	ptr = vptr;
 	for (n = 1; n < maxlen; n++) {
-		if ( (rc = my_read(fd, &c)) == 1) {
+		if ( (rc = read(fd, &c, 1)) == 1) {
 			*ptr++ = c;
 			if (c == '\n')
 				break;
