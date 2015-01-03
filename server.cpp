@@ -284,7 +284,7 @@ int main(int argc, char **argv)
 							fseek(conn_it->fp, n-nr, SEEK_CUR);
 							fprintf(stderr, "not all data are sent\n");
 						} else {
-							fprintf(stderr, "data sent %d\n",n );
+							//fprintf(stderr, "data sent %d\n",n );
 						}
 					}
 
